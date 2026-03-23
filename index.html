@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>階層ToDo・時間記録アプリ (クラウド同期版)</title>
+  <style>
+    :root {
+      --bg: #f6f7fb; --panel: #ffffff; --line: #d9deea; --text: #1f2937;
+      --sub: #6b7280; --accent: #2563eb; --accent-soft: #dbeafe;
+      --danger: #dc2626; --ok: #15803d; --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+      --radius: 14px; --indent: 18px; --hour-height: 28px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; color: var(--text); background: var(--bg); }
+    button, input, textarea { font: inherit; }
+
+    .app { max-width: 1720px; margin: 0 auto; padding: 12px; }
+
+    /* ヘッダーと認証UI */
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; flex-wrap: wrap; gap: 10px; }
+    .header-text h1 { margin: 0 0 4px; font-size: 1.35rem; }
+    .header-text p { margin: 0; color: var(--sub); line-height: 1.45; font-size: 0.92rem; }
+    
+    .auth-container { display: flex; align-items: center; gap: 10px; background: #fff; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); box-shadow: var(--shadow); }
+    .user-info { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: 600; color: #334155; }
+    .user-avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
+    .btn-login { background: var(--accent); color: white; border: none; padding: 6px 14px; border-radius: 999px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+    .btn-login:hover { background: #1d4ed8; }
+    .btn-logout { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 6px 14px; border-radius: 999px; font-size: 0.8rem; cursor: pointer; }
+    .btn-logout:hover { background: #e2e8f0; }
+
+    /* アプリのマスキング（未ログイン時） */
+    #main-app { transition: opacity 0.3s; }
+    #main-app.hidden { opacity: 0.3; pointer-events: none; user-select: none; filter: blur(2px); }
+    .login-overlay-msg { display: none; text-align: center; margin-top: 50px; font-size: 1.2rem; color: var(--sub); font-weight: bold; }
+    #main-app.hidden + .login-overlay-msg { display: block; }
+
+    /* UIコンポーネント */
+    .tabs-panel, .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+    .tabs-panel { padding: 10px; margin-bottom: 10px; }
+    .tabs-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    .tab-btn, .tab-action-btn, .task-create button, .month-controls button, .small-btn, .icon-btn, .detail-btn {
+      border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 7px 10px; cursor: pointer; transition: 0.15s ease; white-space: nowrap;
+    }
+    .tab-btn:hover, .tab-action-btn:hover, .task-create button:hover, .month-controls button:hover, .icon-btn:hover, .detail-btn:hover {
+      transform: translateY(-1px); box-shadow: 0 5px 12px rgba(15, 23, 42, 0.08);
+    }
+    .tab-btn { padding: 7px 12px; font-weight: 700; background: #f8fafc; display: inline-flex; align-items: center; gap: 7px; }
+    .tab-btn.active { background: var(--accent-soft); border-color: #93c5fd; color: #1d4ed8; }
+    .tab-dot { width: 11px; height: 11px; border-radius: 999px; display: inline-block; flex: 0 0 auto; }
+    .tab-actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+    .tab-note { margin-top: 7px; color: var(--sub); font-size: 0.87rem; line-height: 1.4; }
+
+    .layout { display: grid; grid-template-columns: minmax(760px, 1.18fr) minmax(380px, 0.82fr); gap: 10px; align-items: start; }
+    .panel-header { padding: 12px 12px 8px; border-bottom: 1px solid #eef2f7; }
+    .panel-header h2 { margin: 0; font-size: 1rem; }
+    .panel-header .subtext { color: var(--sub); font-size: 0.84rem; margin-top: 4px; line-height: 1.4; }
+    .panel-body { padding: 10px 12px 12px; }
+
+    .task-create { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 8px; }
+    .task-create input, .detail-textarea { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: #fff; }
+    .tip-box { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 12px; padding: 8px 10px; color: var(--sub); font-size: 0.82rem; line-height: 1.45; margin-bottom: 8px; }
+
+    .task-list { min-height: 120px; }
+    .task-block { position: relative; }
+    .drop-gap { height: 7px; margin: 1px 0; position: relative; border-radius: 999px; margin-left: calc(var(--depth) * var(--indent)); }
+    .drop-gap::after { content: ""; position: absolute; left: 6px; right: 6px; top: 50%; border-top: 2px dashed transparent; transform: translateY(-50%); transition: 0.16s ease; }
+    .drop-gap.active::after { border-top-color: var(--accent); }
+
+    .task-row {
+      display: grid; grid-template-columns: auto auto auto auto minmax(140px,1fr) auto auto auto auto;
+      gap: 5px; align-items: center; min-height: 38px; padding: 4px 7px;
+      margin-left: calc(var(--depth) * var(--indent)); border: 1px solid #e8edf5;
+      border-radius: 11px; background: #fff; position: relative; transition: 0.16s ease;
+    }
+    .task-row:hover { border-color: #cbd5e1; box-shadow: 0 5px 14px rgba(15, 23, 42, 0.05); }
+    .task-row.nest-target { background: #eff6ff !important; border-color: #93c5fd !important; }
+    .task-row.active-task { border-color: #86efac !important; box-shadow: 0 0 0 1px rgba(134, 239, 172, 0.65) inset; }
+
+    .task-detail { margin-top: 4px; margin-left: calc(var(--depth) * var(--indent) + 10px); border: 1px solid #e5e7eb; border-radius: 12px; background: #ffffff; padding: 8px; }
+    .detail-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin-bottom: 6px; color: var(--sub); font-size: 0.82rem; font-weight: 700; }
+    .detail-textarea { width: 100%; min-height: 68px; resize: vertical; line-height: 1.45; font-size: 0.9rem; }
+    .detail-help { margin-top: 5px; color: var(--sub); font-size: 0.78rem; }
+
+    .handle, .collapse-btn { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 7px; color: var(--sub); user-select: none; font-weight: 700; }
+    .handle { cursor: grab; }
+    .handle:hover, .collapse-btn:hover { background: rgba(255,255,255,0.5); }
+    .collapse-btn { border: none; background: transparent; cursor: pointer; padding: 0; }
+
+    .timer-btn { border: none; border-radius: 9px; padding: 5px 8px; cursor: pointer; color: white; font-weight: 700; min-width: 47px; font-size: 0.82rem; }
+    .start-btn { background: var(--ok); }
+    .stop-btn { background: var(--danger); }
+    .start-btn:disabled, .stop-btn:disabled { opacity: 0.45; cursor: default; }
+
+    .task-name { width: 100%; border: 1px solid transparent; background: transparent; border-radius: 8px; padding: 5px 7px; min-width: 0; font-weight: 600; font-size: 0.92rem; }
+    .task-name:focus { outline: none; border-color: #bfdbfe; background: rgba(255,255,255,0.82); }
+
+    .meta-wrap { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+    .badge { display: inline-flex; align-items: center; gap: 5px; background: rgba(255,255,255,0.78); border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 999px; padding: 4px 8px; font-size: 0.76rem; color: #334155; white-space: nowrap; }
+    .dot { width: 9px; height: 9px; border-radius: 999px; display: inline-block; flex: 0 0 auto; }
+    .detail-btn, .icon-btn { padding: 5px 8px; color: var(--sub); background: rgba(255,255,255,0.75); font-size: 0.82rem; }
+    .detail-btn.open { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+
+    .color-picker { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; justify-content: flex-end; max-width: 152px; }
+    .color-swatch { width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(15, 23, 42, 0.18); padding: 0; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35); }
+    .color-swatch.selected { outline: 2px solid #1d4ed8; outline-offset: 1px; transform: scale(1.06); }
+
+    .children { margin-top: 2px; }
+    .empty { text-align: center; color: var(--sub); padding: 20px 10px; border: 1px dashed #d1d5db; border-radius: 12px; background: #fcfcfd; font-size: 0.9rem; }
+
+    /* カレンダーとタイムライン */
+    .calendar-panel { display: grid; gap: 10px; }
+    .month-controls { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+    .month-title { font-weight: 700; font-size: 0.96rem; margin-right: auto; }
+    .calendar-wrap.hidden, .month-nav.hidden { display: none; }
+    .month-nav { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+    .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+    .weekday { text-align: center; color: var(--sub); font-size: 0.78rem; padding-bottom: 2px; font-weight: 600; }
+    .day-cell { min-height: 74px; border: 1px solid #e5e7eb; border-radius: 11px; padding: 5px; background: white; cursor: pointer; display: flex; flex-direction: column; gap: 3px; transition: 0.16s ease; }
+    .day-cell:hover { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(15, 23, 42, 0.05); }
+    .day-cell.other-month { background: #f8fafc; color: #9ca3af; }
+    .day-cell.selected { border-color: #60a5fa; background: #eff6ff; }
+    .day-cell.today { outline: 2px solid #bfdbfe; outline-offset: 1px; }
+    .day-top { display: flex; align-items: center; justify-content: space-between; gap: 5px; font-size: 0.78rem; }
+    .day-total { color: #334155; font-size: 0.72rem; font-weight: 700; }
+    .mini-bars { display: grid; gap: 2px; margin-top: auto; }
+    .mini-bar { height: 6px; border-radius: 999px; width: var(--w); background: var(--c); min-width: 6px; opacity: 0.95; }
+
+    .timeline-card { border: 1px solid #e5e7eb; border-radius: 14px; padding: 10px; background: #fcfcff; }
+    .timeline-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+    .timeline-head h3 { margin: 0; font-size: 0.98rem; }
+    .timeline-sub { color: var(--sub); font-size: 0.82rem; line-height: 1.4; }
+    .timeline { position: relative; border: 1px solid #e5e7eb; border-radius: 12px; background: white; overflow: hidden; }
+    .timeline-grid { position: relative; height: calc(24 * var(--hour-height)); }
+    .hour-line { position: absolute; left: 0; right: 0; height: 1px; background: #eef2f7; }
+    .hour-label { position: absolute; left: 8px; transform: translateY(-50%); color: #64748b; font-size: 0.72rem; background: rgba(255,255,255,0.92); padding: 0 3px; }
+    .session-block { position: absolute; left: 58px; right: 8px; border-radius: 10px; padding: 5px 8px; color: #0f172a; font-size: 0.78rem; overflow: hidden; border: 1px solid rgba(15, 23, 42, 0.08); box-shadow: 0 5px 12px rgba(15, 23, 42, 0.08); }
+    .session-title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-time { font-size: 0.72rem; opacity: 0.9; margin-top: 2px; }
+    .session-list { display: grid; gap: 6px; margin-top: 8px; }
+    .session-item { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; border: 1px solid #e5e7eb; border-radius: 10px; padding: 7px 9px; background: white; }
+    .session-item .name { font-weight: 700; font-size: 0.88rem; }
+    .session-item .path { color: var(--sub); font-size: 0.78rem; margin-top: 1px; line-height: 1.35; }
+    .session-item .time { font-size: 0.78rem; color: #334155; font-weight: 700; white-space: nowrap; text-align: right; }
+    .tab-chip { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; font-size: 0.75rem; color: #475569; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 999px; padding: 2px 7px; }
+    .legend { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .legend-item { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 999px; background: #fff; border: 1px solid #e5e7eb; font-size: 0.78rem; }
+    .footer-note { margin-top: 8px; color: var(--sub); font-size: 0.76rem; line-height: 1.45; }
+
+    @media (max-width: 1320px) {
+      .task-row { grid-template-columns: auto auto auto auto minmax(160px, 1fr) auto auto; grid-template-areas: "handle collapse start stop name detail delete" "meta meta meta meta meta colors colors"; }
+      .handle { grid-area: handle; } .collapse-btn { grid-area: collapse; } .start-btn { grid-area: start; } .stop-btn { grid-area: stop; } .task-name { grid-area: name; } .detail-btn { grid-area: detail; } .icon-btn { grid-area: delete; justify-self: end; } .meta-wrap { grid-area: meta; justify-content: flex-start; } .color-picker { grid-area: colors; justify-content: flex-end; max-width: none; }
+    }
+    @media (max-width: 1160px) { .layout { grid-template-columns: 1fr; } }
+    @media (max-width: 760px) {
+      .app { padding: 8px; } .task-create { grid-template-columns: 1fr; }
+      .task-row { grid-template-columns: auto auto auto auto; grid-template-areas: "handle collapse start stop" "name name name name" "meta meta meta meta" "detail colors colors delete"; }
+      .meta-wrap { justify-content: flex-start; } .color-picker { justify-content: flex-start; } .calendar-grid { gap: 4px; } .day-cell { min-height: 68px; } .session-block { left: 50px; } .tab-actions { width: 100%; margin-left: 0; } .month-title { width: 100%; margin-right: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    
+    <div class="header">
+      <div class="header-text">
+        <h1>階層ToDo・時間記録アプリ</h1>
+        <p>Googleアカウントでログインすると、クラウドに保存され複数端末で同期されます。</p>
+      </div>
+      <div class="auth-container" id="auth-container">
+        <button class="btn-login" id="loginBtn">Googleでログイン</button>
+        </div>
+    </div>
+
+    <div id="main-app" class="hidden">
+      <section class="tabs-panel">
+        <div class="tabs-row" id="tabsRow"></div>
+        <div class="tab-note" id="tabNote"></div>
+      </section>
+
+      <div class="layout">
+        <section class="panel">
+          <div class="panel-header">
+            <h2>To Do リスト</h2>
+            <div class="subtext">上・下のすき間にドロップで並び替え、行の上に重ねてドロップでサブタスク化。親タスクに子がある場合は「子合計」のみ表示します。</div>
+          </div>
+          <div class="panel-body">
+            <div class="task-create">
+              <input id="newTaskInput" type="text" placeholder="新しいタスク名を入力" disabled />
+              <button id="addTaskBtn" disabled>タスク追加</button>
+            </div>
+            <div class="tip-box">
+              Startを押すと、ほかの動作中タスクは自動でStopされます。色は右側の小さな四角をクリックして変更できます。メモは「詳細」を押したときだけ表示されます。
+            </div>
+            <div id="taskList" class="task-list"></div>
+          </div>
+        </section>
+
+        <section class="calendar-panel">
+          <section class="panel">
+            <div class="panel-header">
+              <h2>日付</h2>
+              <div class="subtext">「表示する日付を変更」を押したときだけカレンダーを表示します。</div>
+            </div>
+            <div class="panel-body">
+              <div class="month-controls">
+                <div id="monthTitle" class="month-title"></div>
+                <button id="toggleCalendarBtn" disabled>表示する日付を変更</button>
+                <div id="monthNav" class="month-nav hidden">
+                  <button id="prevMonthBtn">◀</button>
+                  <button id="todayBtn">今日</button>
+                  <button id="nextMonthBtn">▶</button>
+                </div>
+              </div>
+              <div id="calendarWrap" class="calendar-wrap hidden">
+                <div id="calendarGrid" class="calendar-grid"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h2>1日の記録</h2>
+              <div class="subtext">選択した日の記録を、全タブまとめて縦タイムラインで表示します。色はタブごとに分かれます。</div>
+            </div>
+            <div class="panel-body" id="dayDetail"></div>
+          </section>
+        </section>
+      </div>
+    </div>
+    
+    <div class="login-overlay-msg">アプリを利用するにはログインしてください。</div>
+
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+    import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+    // =========================================================================
+    // 【重要】Firebase Consoleから取得したfirebaseConfigの中身をここに貼り付けます
+    // =========================================================================
+    const firebaseConfig = {
+  apiKey: "AIzaSyBtl8Gzq-mNj7bqfXWwQxKRqo0AYvJfjfQ",
+  authDomain: "time-tracker-app-5d79a.firebaseapp.com",
+  projectId: "time-tracker-app-5d79a",
+  storageBucket: "time-tracker-app-5d79a.firebasestorage.app",
+  messagingSenderId: "847291983854",
+  appId: "1:847291983854:web:dbb2d55541af1d1fbc50ff"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const provider = new GoogleAuthProvider();
+
+    // グローバル変数
+    let currentUser = null;
+    let unsubscribeSnapshot = null;
+    let syncStatusText = "待機中...";
+
+    const COLOR_PALETTE = [
+      { key: 'rose', label: 'ローズ', solid: '#e11d48', soft: 'rgba(225, 29, 72, 0.12)', mid: 'rgba(225, 29, 72, 0.26)' },
+      { key: 'orange', label: 'オレンジ', solid: '#ea580c', soft: 'rgba(234, 88, 12, 0.12)', mid: 'rgba(234, 88, 12, 0.26)' },
+      { key: 'amber', label: 'アンバー', solid: '#d97706', soft: 'rgba(217, 119, 6, 0.12)', mid: 'rgba(217, 119, 6, 0.26)' },
+      { key: 'green', label: 'グリーン', solid: '#16a34a', soft: 'rgba(22, 163, 74, 0.12)', mid: 'rgba(22, 163, 74, 0.26)' },
+      { key: 'teal', label: 'ティール', solid: '#0f766e', solid: '#0f766e', soft: 'rgba(15, 118, 110, 0.12)', mid: 'rgba(15, 118, 110, 0.26)' },
+      { key: 'blue', label: 'ブルー', solid: '#2563eb', soft: 'rgba(37, 99, 235, 0.12)', mid: 'rgba(37, 99, 235, 0.26)' },
+      { key: 'violet', label: 'バイオレット', solid: '#7c3aed', soft: 'rgba(124, 58, 237, 0.12)', mid: 'rgba(124, 58, 237, 0.26)' },
+      { key: 'slate', label: 'スレート', solid: '#475569', soft: 'rgba(71, 85, 105, 0.12)', mid: 'rgba(71, 85, 105, 0.26)' }
+    ];
+
+    const now = new Date();
+    let state = {
+      tabs: [{ id: 'tab_default', name: '日常', colorKey: 'blue' }],
+      activeTabId: 'tab_default',
+      tasks: [],
+      activeTaskId: null,
+      selectedDate: toDateKey(now),
+      viewYear: now.getFullYear(),
+      viewMonth: now.getMonth(),
+      viewCalendar: false
+    };
+
+    const dragState = { draggingId: null, overGapKey: null, overNestId: null };
+
+    const els = {
+      authContainer: document.getElementById('auth-container'),
+      mainApp: document.getElementById('main-app'),
+      loginBtn: document.getElementById('loginBtn'),
+      tabsRow: document.getElementById('tabsRow'), tabNote: document.getElementById('tabNote'),
+      newTaskInput: document.getElementById('newTaskInput'), addTaskBtn: document.getElementById('addTaskBtn'),
+      taskList: document.getElementById('taskList'), monthTitle: document.getElementById('monthTitle'),
+      calendarGrid: document.getElementById('calendarGrid'), dayDetail: document.getElementById('dayDetail'),
+      prevMonthBtn: document.getElementById('prevMonthBtn'), todayBtn: document.getElementById('todayBtn'),
+      nextMonthBtn: document.getElementById('nextMonthBtn'), toggleCalendarBtn: document.getElementById('toggleCalendarBtn'),
+      calendarWrap: document.getElementById('calendarWrap'), monthNav: document.getElementById('monthNav')
+    };
+
+    // ==========================================
+    // 認証 (Auth) 関連の処理
+    // ==========================================
+    els.loginBtn.addEventListener('click', () => {
+      signInWithPopup(auth, provider).catch(error => console.error("Login Error:", error));
+    });
+
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        currentUser = user;
+        // ログイン成功時のUI更新
+        els.authContainer.innerHTML = `
+          <div class="user-info">
+            <img src="${user.photoURL || 'https://via.placeholder.com/28'}" class="user-avatar" alt="icon">
+            ${user.displayName || 'ユーザー'}
+            <span style="font-size:0.75rem; color:var(--sub); font-weight:normal;" id="sync-status">同期中...</span>
+          </div>
+          <button class="btn-logout" id="logoutBtn">ログアウト</button>
+        `;
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+          signOut(auth);
+        });
+        
+        // アプリを使えるようにする
+        els.mainApp.classList.remove('hidden');
+        els.newTaskInput.disabled = false;
+        els.addTaskBtn.disabled = false;
+        els.toggleCalendarBtn.disabled = false;
+
+        // データの購読開始
+        subscribeToData(user.uid);
+      } else {
+        currentUser = null;
+        if(unsubscribeSnapshot) unsubscribeSnapshot();
+        
+        // ログアウト時のUI
+        els.authContainer.innerHTML = `<button class="btn-login" id="loginBtn">Googleでログイン</button>`;
+        document.getElementById('loginBtn').addEventListener('click', () => {
+          signInWithPopup(auth, provider).catch(console.error);
+        });
+
+        // アプリを隠す
+        els.mainApp.classList.add('hidden');
+        els.newTaskInput.disabled = true;
+        els.addTaskBtn.disabled = true;
+        els.toggleCalendarBtn.disabled = true;
+        state.tasks = [];
+        render();
+      }
+    });
+
+    // ==========================================
+    // データベース (Firestore) 関連の処理
+    // ==========================================
+    function subscribeToData(uid) {
+      const docRef = doc(db, "users_data", uid);
+      
+      unsubscribeSnapshot = onSnapshot(docRef, (docSnap) => {
+        const statusEl = document.getElementById('sync-status');
+        
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          // 自分の操作によるローカル予測更新ではない（＝クラウドからの確定データ）場合のみ反映
+          if (!docSnap.metadata.hasPendingWrites) {
+            state = { ...state, ...data };
+            if(statusEl) { statusEl.textContent = "✔ 同期済"; statusEl.style.color = "var(--ok)"; }
+            render();
+          }
+        } else {
+          // 初回ユーザーの場合は初期データを保存
+          if(statusEl) statusEl.textContent = "初期設定中...";
+          saveState();
+        }
+      });
+    }
+
+    async function saveState() {
+      if (!currentUser) return;
+      const statusEl = document.getElementById('sync-status');
+      if(statusEl) { statusEl.textContent = "↑ 保存中..."; statusEl.style.color = "var(--accent)"; }
+      
+      try {
+        const docRef = doc(db, "users_data", currentUser.uid);
+        await setDoc(docRef, state);
+        if(statusEl) { statusEl.textContent = "✔ 同期済"; statusEl.style.color = "var(--ok)"; }
+      } catch (error) {
+        console.error("Save Error:", error);
+        if(statusEl) { statusEl.textContent = "⚠ エラー"; statusEl.style.color = "var(--danger)"; }
+      }
+    }
+
+
+    // ==========================================
+    // 以降はUIとロジック（v4.htmlを移植）
+    // ==========================================
+    bindEvents();
+
+    setInterval(() => {
+      if(!currentUser) return;
+      const focused = document.activeElement;
+      const editingText = focused && focused.classList && (
+        focused.classList.contains('task-name') || focused.classList.contains('detail-textarea')
+      );
+      if (state.activeTaskId && !dragState.draggingId && !editingText) {
+        renderTaskList();
+        renderDayDetail();
+      }
+    }, 1000);
+
+    function bindEvents() {
+      els.addTaskBtn.addEventListener('click', addRootTaskFromInput);
+      els.newTaskInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') addRootTaskFromInput();
+      });
+      els.toggleCalendarBtn.addEventListener('click', () => {
+        state.viewCalendar = !state.viewCalendar;
+        saveState();
+        renderCalendar();
+      });
+      els.prevMonthBtn.addEventListener('click', () => {
+        state.viewMonth -= 1;
+        if (state.viewMonth < 0) { state.viewMonth = 11; state.viewYear -= 1; }
+        saveState(); renderCalendar();
+      });
+      els.nextMonthBtn.addEventListener('click', () => {
+        state.viewMonth += 1;
+        if (state.viewMonth > 11) { state.viewMonth = 0; state.viewYear += 1; }
+        saveState(); renderCalendar();
+      });
+      els.todayBtn.addEventListener('click', () => {
+        const d = new Date();
+        state.viewYear = d.getFullYear(); state.viewMonth = d.getMonth();
+        state.selectedDate = toDateKey(d); state.viewCalendar = false;
+        saveState(); render();
+      });
+    }
+
+    function currentTabId() { return state.activeTabId; }
+    function currentTab() { return state.tabs.find(tab => tab.id === currentTabId()) || state.tabs[0] || null; }
+
+    function addRootTaskFromInput() {
+      const name = els.newTaskInput.value.trim();
+      if (!name) return;
+      createTask(name, null, currentTabId());
+      els.newTaskInput.value = '';
+    }
+
+    function createTask(name, parentId = null, tabId = currentTabId()) {
+      const siblings = getChildren(parentId, tabId);
+      const newTask = {
+        id: generateId('task'), name, parentId, tabId,
+        order: siblings.length, sessions: [], activeStart: null,
+        collapsed: false, note: '', detailOpen: false,
+        colorKey: defaultColorKeyForTask(name + Date.now())
+      };
+      state.tasks.push(newTask);
+      saveState(); render();
+    }
+
+    function createTab() {
+      const name = prompt('新しいタブ名を入力してください', `新しいタブ${state.tabs.length + 1}`);
+      if (!name || !name.trim()) return;
+      const tab = { id: generateId('tab'), name: name.trim(), colorKey: COLOR_PALETTE[state.tabs.length % COLOR_PALETTE.length].key };
+      state.tabs.push(tab); state.activeTabId = tab.id;
+      saveState(); render();
+    }
+
+    function renameActiveTab() {
+      const tab = currentTab(); if (!tab) return;
+      const name = prompt('タブ名を入力してください', tab.name);
+      if (!name || !name.trim()) return;
+      tab.name = name.trim();
+      saveState(); renderTabs(); renderDayDetail();
+    }
+
+    function deleteActiveTab() {
+      if (state.tabs.length <= 1) { alert('最後の1つのタブは削除できません。'); return; }
+      const tab = currentTab(); if (!tab) return;
+      if (!confirm(`「${tab.name}」タブを削除しますか？\nタスクと記録も削除されます。`)) return;
+      getTasksInTab(tab.id).forEach(task => stopTask(task.id, false));
+      state.tasks = state.tasks.filter(task => task.tabId !== tab.id);
+      state.tabs = state.tabs.filter(t => t.id !== tab.id);
+      state.activeTabId = state.tabs[0].id;
+      saveState(); render();
+    }
+
+    function switchTab(tabId) {
+      if (!state.tabs.some(tab => tab.id === tabId)) return;
+      state.activeTabId = tabId; saveState(); render();
+    }
+
+    function updateTaskName(taskId, newName) {
+      const task = getTask(taskId); if (!task) return;
+      task.name = newName.trim() || '無題タスク'; saveState();
+    }
+    function updateTaskNote(taskId, newNote) {
+      const task = getTask(taskId); if (!task) return;
+      task.note = newNote; saveState();
+    }
+    function updateTaskColor(taskId, colorKey) {
+      const task = getTask(taskId); if (!task) return;
+      task.colorKey = COLOR_PALETTE.some(c => c.key === colorKey) ? colorKey : task.colorKey;
+      saveState(); renderTaskList(); renderCalendar();
+    }
+    function toggleTaskDetail(taskId) {
+      const task = getTask(taskId); if (!task) return;
+      task.detailOpen = !task.detailOpen; saveState(); renderTaskList();
+    }
+    function toggleCollapsed(taskId) {
+      const task = getTask(taskId); if (!task) return;
+      task.collapsed = !task.collapsed; saveState(); renderTaskList();
+    }
+
+    function deleteTask(taskId) {
+      const task = getTask(taskId); if (!task) return;
+      const deleteIds = new Set([taskId, ...getDescendantIds(taskId, task.tabId)]);
+      deleteIds.forEach(id => stopTask(id, false));
+      state.tasks = state.tasks.filter(t => !deleteIds.has(t.id));
+      normalizeOrders(task.parentId, task.tabId);
+      saveState(); render();
+    }
+
+    function startTask(taskId) {
+      const task = getTask(taskId); if (!task) return;
+      if (state.activeTaskId && state.activeTaskId !== taskId) stopTask(state.activeTaskId, false);
+      if (task.activeStart) return;
+      task.activeStart = new Date().toISOString(); state.activeTaskId = taskId;
+      saveState(); render();
+    }
+
+    function stopTask(taskId, shouldRender = true) {
+      const task = getTask(taskId); if (!task || !task.activeStart) return;
+      const start = new Date(task.activeStart).getTime(), end = Date.now();
+      if (end > start) task.sessions.push({ start: task.activeStart, end: new Date(end).toISOString() });
+      task.activeStart = null;
+      if (state.activeTaskId === taskId) state.activeTaskId = null;
+      saveState(); if (shouldRender) render();
+    }
+
+    function moveTask(taskId, newParentId, newIndex) {
+      const task = getTask(taskId); if (!task || taskId === newParentId) return;
+      if (newParentId && isDescendant(newParentId, taskId, task.tabId)) return;
+      const oldParentId = task.parentId, tabId = task.tabId;
+      const oldSiblingIds = getChildren(oldParentId, tabId).map(t => t.id).filter(id => id !== taskId);
+      const targetSiblingIds = (newParentId === oldParentId) ? oldSiblingIds.slice() : getChildren(newParentId, tabId).map(t => t.id).filter(id => id !== taskId);
+      const clampedIndex = Math.max(0, Math.min(newIndex, targetSiblingIds.length));
+      targetSiblingIds.splice(clampedIndex, 0, taskId);
+      task.parentId = newParentId;
+      if (newParentId === oldParentId) { setSiblingOrder(newParentId, targetSiblingIds, tabId); } 
+      else { setSiblingOrder(oldParentId, oldSiblingIds, tabId); setSiblingOrder(newParentId, targetSiblingIds, tabId); }
+      saveState(); renderTaskList();
+    }
+
+    function makeSubtask(taskId, targetTaskId) {
+      const target = getTask(targetTaskId), task = getTask(taskId);
+      if (!target || !task || target.tabId !== task.tabId) return;
+      moveTask(taskId, targetTaskId, getChildren(targetTaskId, task.tabId).length);
+    }
+
+    function generateId(prefix) { return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`; }
+    function getTask(taskId) { return state.tasks.find(t => t.id === taskId) || null; }
+    function getTab(tabId) { return state.tabs.find(t => t.id === tabId) || null; }
+    function getTasksInTab(tabId = currentTabId()) { return state.tasks.filter(t => t.tabId === tabId); }
+    function getChildren(parentId, tabId = currentTabId()) {
+      return state.tasks.filter(t => t.tabId === tabId && t.parentId === parentId).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+    }
+    function setSiblingOrder(parentId, orderedIds, tabId = currentTabId()) {
+      orderedIds.forEach((id, index) => {
+        const task = getTask(id); if (task && task.tabId === tabId) { task.parentId = parentId; task.order = index; }
+      });
+    }
+    function normalizeOrders(parentId, tabId = currentTabId()) {
+      getChildren(parentId, tabId).forEach((task, index) => task.order = index);
+    }
+    function getDescendantIds(taskId, tabId = currentTabId()) {
+      const result = [], queue = [taskId];
+      while (queue.length) {
+        const current = queue.shift();
+        getChildren(current, tabId).forEach(child => { result.push(child.id); queue.push(child.id); });
+      }
+      return result;
+    }
+    function isDescendant(descendantId, ancestorId, tabId = currentTabId()) {
+      let current = getTask(descendantId);
+      while (current && current.parentId) {
+        if (current.tabId !== tabId) return false;
+        if (current.parentId === ancestorId) return true;
+        current = getTask(current.parentId);
+      }
+      return false;
+    }
+    function hasChildren(taskId) { const task = getTask(taskId); return task ? getChildren(taskId, task.tabId).length > 0 : false; }
+    function getTaskPath(taskId) {
+      const names = []; let current = getTask(taskId);
+      while (current) { names.unshift(current.name); current = current.parentId ? getTask(current.parentId) : null; }
+      return names;
+    }
+
+    function getOwnDurationMs(taskId) {
+      const task = getTask(taskId); if (!task) return 0;
+      let total = 0;
+      for (const s of task.sessions) {
+        const start = new Date(s.start).getTime(), end = new Date(s.end).getTime();
+        if (Number.isFinite(start) && Number.isFinite(end) && end > start) total += end - start;
+      }
+      if (task.activeStart) {
+        const start = new Date(task.activeStart).getTime();
+        if (Number.isFinite(start)) total += Math.max(0, Date.now() - start);
+      }
+      return total;
+    }
+    function getDescendantDurationMs(taskId) {
+      const task = getTask(taskId); if (!task) return 0;
+      return getDescendantIds(taskId, task.tabId).reduce((sum, id) => sum + getOwnDurationMs(id), 0);
+    }
+
+    function getAllSessionsWithDaySplit(dateKey, options = {}) {
+      const { includeAllTabs = false, tabId = currentTabId() } = options;
+      const dayStart = new Date(dateKey + 'T00:00:00'), dayEnd = new Date(dateKey + 'T24:00:00');
+      const segments = [];
+      const tasks = includeAllTabs ? state.tasks.slice() : getTasksInTab(tabId);
+
+      for (const task of tasks) {
+        const allSessions = task.sessions.map(s => ({ start: s.start, end: s.end }));
+        if (task.activeStart) allSessions.push({ start: task.activeStart, end: new Date().toISOString(), active: true });
+
+        for (const session of allSessions) {
+          const start = new Date(session.start), end = new Date(session.end);
+          if (!(end > dayStart && start < dayEnd)) continue;
+          const clippedStart = new Date(Math.max(start.getTime(), dayStart.getTime()));
+          const clippedEnd = new Date(Math.min(end.getTime(), dayEnd.getTime()));
+          if (clippedEnd <= clippedStart) continue;
+
+          const tab = getTab(task.tabId);
+          segments.push({
+            taskId: task.id, taskName: task.name, path: getTaskPath(task.id),
+            tabId: task.tabId, tabName: tab ? tab.name : '無題タブ', tabColorKey: tab ? tab.colorKey : 'blue',
+            start: clippedStart, end: clippedEnd, isActive: Boolean(session.active)
+          });
+        }
+      }
+      return segments.sort((a, b) => a.start - b.start);
+    }
+
+    function getCalendarDaySummary(dateKey) {
+      const segments = getAllSessionsWithDaySplit(dateKey, { includeAllTabs: false, tabId: currentTabId() });
+      const total = segments.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
+      const byTask = new Map();
+      for (const seg of segments) byTask.set(seg.taskId, (byTask.get(seg.taskId) || 0) + (seg.end - seg.start));
+      const topTasks = [...byTask.entries()].map(([taskId, ms]) => ({ taskId, ms, task: getTask(taskId) })).filter(x => x.task).sort((a, b) => b.ms - a.ms).slice(0, 4);
+      return { total, topTasks };
+    }
+
+    function render() {
+      if(!currentUser) return;
+      renderTabs(); renderTaskList(); renderCalendar(); renderDayDetail();
+    }
+
+    function renderTabs() {
+      els.tabsRow.innerHTML = '';
+      state.tabs.forEach(tab => {
+        const btn = document.createElement('button');
+        btn.className = 'tab-btn' + (tab.id === currentTabId() ? ' active' : '');
+        btn.innerHTML = `<span class="tab-dot" style="background:${colorForTab(tab.id)}"></span>${escapeHtml(tab.name)}`;
+        btn.addEventListener('click', () => switchTab(tab.id));
+        els.tabsRow.appendChild(btn);
+      });
+
+      const actions = document.createElement('div'); actions.className = 'tab-actions';
+      const addBtn = document.createElement('button'); addBtn.className = 'tab-action-btn'; addBtn.textContent = '＋ タブ追加'; addBtn.addEventListener('click', createTab); actions.appendChild(addBtn);
+      const renameBtn = document.createElement('button'); renameBtn.className = 'tab-action-btn'; renameBtn.textContent = '名前変更'; renameBtn.addEventListener('click', renameActiveTab); actions.appendChild(renameBtn);
+      const deleteBtn = document.createElement('button'); deleteBtn.className = 'tab-action-btn'; deleteBtn.textContent = 'タブ削除'; deleteBtn.addEventListener('click', deleteActiveTab); actions.appendChild(deleteBtn);
+      els.tabsRow.appendChild(actions);
+
+      const tab = currentTab(), count = getTasksInTab().length;
+      els.tabNote.textContent = tab ? `現在のタブ: ${tab.name} / タスク数: ${count} / 1日の記録は全タブまとめて表示` : '';
+    }
+
+    function renderTaskList() {
+      els.taskList.innerHTML = '';
+      if (getTasksInTab().length === 0) {
+        const empty = document.createElement('div'); empty.className = 'empty'; empty.textContent = 'このタブにはまだタスクがありません。上の入力欄から追加してください。'; els.taskList.appendChild(empty);
+        return;
+      }
+      els.taskList.appendChild(renderTaskChildren(null, 0, currentTabId()));
+    }
+
+    function renderTaskChildren(parentId, depth, tabId) {
+      const wrapper = document.createElement('div'); wrapper.className = 'children';
+      wrapper.appendChild(createGap(parentId, 0, depth, tabId));
+      getChildren(parentId, tabId).forEach((task, index) => {
+        const block = document.createElement('div'); block.className = 'task-block';
+        block.appendChild(createTaskRow(task, depth));
+        if (task.detailOpen) block.appendChild(createDetailPanel(task, depth));
+        if (!task.collapsed && hasChildren(task.id)) block.appendChild(renderTaskChildren(task.id, depth + 1, tabId));
+        wrapper.appendChild(block);
+        wrapper.appendChild(createGap(parentId, index + 1, depth, tabId));
+      });
+      return wrapper;
+    }
+
+    function createGap(parentId, index, depth, tabId) {
+      const gap = document.createElement('div'); const key = `${tabId}__${parentId ?? 'root'}__${index}`;
+      gap.className = 'drop-gap'; gap.dataset.gapKey = key; gap.style.setProperty('--depth', depth);
+      if (dragState.overGapKey === key) gap.classList.add('active');
+
+      gap.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (dragState.overGapKey !== key || dragState.overNestId !== null) { dragState.overGapKey = key; dragState.overNestId = null; updateDragHighlights(); }
+      });
+      gap.addEventListener('dragleave', () => { if (dragState.overGapKey === key) { dragState.overGapKey = null; updateDragHighlights(); } });
+      gap.addEventListener('drop', (e) => {
+        e.preventDefault(); if (!dragState.draggingId) return;
+        const draggedId = dragState.draggingId; clearDragState(false); moveTask(draggedId, parentId, index);
+      });
+      return gap;
+    }
+
+    function createTaskRow(task, depth) {
+      const row = document.createElement('div'); row.className = 'task-row'; row.dataset.taskId = task.id; row.style.setProperty('--depth', depth);
+      applyTaskRowColor(row, task);
+      if (task.activeStart) row.classList.add('active-task');
+      if (dragState.overNestId === task.id) row.classList.add('nest-target');
+
+      const handle = document.createElement('div'); handle.className = 'handle'; handle.textContent = '⋮⋮'; handle.draggable = true; handle.title = 'ドラッグして移動';
+      handle.addEventListener('dragstart', (e) => { dragState.draggingId = task.id; if (e.dataTransfer) { e.dataTransfer.setData('text/plain', task.id); e.dataTransfer.effectAllowed = 'move'; } });
+      handle.addEventListener('dragend', () => clearDragState()); row.appendChild(handle);
+
+      const collapseBtn = document.createElement('button'); collapseBtn.className = 'collapse-btn'; collapseBtn.textContent = hasChildren(task.id) ? (task.collapsed ? '▶' : '▼') : '•'; collapseBtn.disabled = !hasChildren(task.id);
+      collapseBtn.addEventListener('click', () => toggleCollapsed(task.id)); row.appendChild(collapseBtn);
+
+      const startBtn = document.createElement('button'); startBtn.className = 'timer-btn start-btn'; startBtn.textContent = 'Start'; startBtn.disabled = Boolean(task.activeStart);
+      startBtn.addEventListener('click', () => startTask(task.id)); row.appendChild(startBtn);
+
+      const stopBtn = document.createElement('button'); stopBtn.className = 'timer-btn stop-btn'; stopBtn.textContent = 'Stop'; stopBtn.disabled = !task.activeStart;
+      stopBtn.addEventListener('click', () => stopTask(task.id)); row.appendChild(stopBtn);
+
+      const nameInput = document.createElement('input'); nameInput.className = 'task-name'; nameInput.value = task.name;
+      nameInput.addEventListener('change', () => updateTaskName(task.id, nameInput.value));
+      nameInput.addEventListener('blur', () => { updateTaskName(task.id, nameInput.value); renderTaskList(); renderCalendar(); renderDayDetail(); });
+      row.appendChild(nameInput);
+
+      const meta = document.createElement('div'); meta.className = 'meta-wrap';
+      if (hasChildren(task.id)) { meta.innerHTML = `<span class="badge"><span class="dot" style="background:${colorForTask(task.id)}"></span>子合計 ${formatDuration(getDescendantDurationMs(task.id))}</span>`; } 
+      else { meta.innerHTML = `<span class="badge"><span class="dot" style="background:${colorForTask(task.id)}"></span>${formatDuration(getOwnDurationMs(task.id))}</span>`; }
+      if (task.note && task.note.trim()) { const b = document.createElement('span'); b.className = 'badge'; b.textContent = 'メモ'; meta.appendChild(b); }
+      if (task.activeStart) { const b = document.createElement('span'); b.className = 'badge'; b.textContent = '計測中'; meta.appendChild(b); }
+      row.appendChild(meta);
+
+      const detailBtn = document.createElement('button'); detailBtn.className = 'detail-btn' + (task.detailOpen ? ' open' : ''); detailBtn.textContent = '詳細';
+      detailBtn.addEventListener('click', () => toggleTaskDetail(task.id)); row.appendChild(detailBtn);
+
+      const colorPicker = document.createElement('div'); colorPicker.className = 'color-picker';
+      COLOR_PALETTE.forEach(color => {
+        const swatch = document.createElement('button'); swatch.className = 'color-swatch' + (task.colorKey === color.key ? ' selected' : ''); swatch.style.background = color.solid;
+        swatch.addEventListener('click', (e) => { e.stopPropagation(); updateTaskColor(task.id, color.key); }); colorPicker.appendChild(swatch);
+      }); row.appendChild(colorPicker);
+
+      const delBtn = document.createElement('button'); delBtn.className = 'icon-btn'; delBtn.textContent = '削除';
+      delBtn.addEventListener('click', () => { if (confirm(`「${task.name}」を削除しますか？\n子タスクも一緒に削除されます。`)) deleteTask(task.id); }); row.appendChild(delBtn);
+
+      row.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (!dragState.draggingId || dragState.draggingId === task.id || isDescendant(task.id, dragState.draggingId, task.tabId)) return;
+        if (dragState.overNestId !== task.id || dragState.overGapKey !== null) { dragState.overNestId = task.id; dragState.overGapKey = null; updateDragHighlights(); }
+      });
+      row.addEventListener('dragleave', () => { if (dragState.overNestId === task.id) { dragState.overNestId = null; updateDragHighlights(); } });
+      row.addEventListener('drop', (e) => {
+        e.preventDefault(); if (!dragState.draggingId) return;
+        const draggedId = dragState.draggingId; clearDragState(false); makeSubtask(draggedId, task.id);
+      });
+      return row;
+    }
+
+    function createDetailPanel(task, depth) {
+      const panel = document.createElement('div'); panel.className = 'task-detail'; panel.style.setProperty('--depth', depth);
+      panel.innerHTML = `<div class="detail-head"><span>メモ</span><span>${escapeHtml(colorLabel(task.colorKey))}</span></div>`;
+      const textarea = document.createElement('textarea'); textarea.className = 'detail-textarea'; textarea.placeholder = 'このタスクのメモを入力'; textarea.value = task.note || '';
+      textarea.addEventListener('input', () => updateTaskNote(task.id, textarea.value));
+      textarea.addEventListener('blur', () => renderTaskList()); panel.appendChild(textarea);
+      panel.innerHTML += `<div class="detail-help">メモは普段は表示されず、「詳細」を押したときだけ開きます。</div>`;
+      return panel;
+    }
+
+    function renderCalendar() {
+      const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+      els.monthTitle.textContent = `${formatDateJP(state.selectedDate)} / ${monthNames[state.viewMonth]}表示`;
+      els.toggleCalendarBtn.textContent = state.viewCalendar ? '日付変更を閉じる' : '表示する日付を変更';
+      els.calendarWrap.classList.toggle('hidden', !state.viewCalendar); els.monthNav.classList.toggle('hidden', !state.viewCalendar);
+      els.calendarGrid.innerHTML = ''; if (!state.viewCalendar) return;
+
+      ['日','月','火','水','木','金','土'].forEach(day => { const w = document.createElement('div'); w.className = 'weekday'; w.textContent = day; els.calendarGrid.appendChild(w); });
+
+      const firstDay = new Date(state.viewYear, state.viewMonth, 1), startOffset = firstDay.getDay();
+      const daysInMonth = new Date(state.viewYear, state.viewMonth + 1, 0).getDate(), prevMonthDays = new Date(state.viewYear, state.viewMonth, 0).getDate();
+      const todayKey = toDateKey(new Date()), cells = [];
+
+      for (let i = startOffset - 1; i >= 0; i--) cells.push({ date: new Date(state.viewYear, state.viewMonth - 1, prevMonthDays - i), otherMonth: true });
+      for (let day = 1; day <= daysInMonth; day++) cells.push({ date: new Date(state.viewYear, state.viewMonth, day), otherMonth: false });
+      while (cells.length < 42) cells.push({ date: new Date(state.viewYear, state.viewMonth + 1, cells.length - (startOffset + daysInMonth) + 1), otherMonth: true });
+
+      cells.forEach(({ date, otherMonth }) => {
+        const key = toDateKey(date), summary = getCalendarDaySummary(key);
+        const cell = document.createElement('div'); cell.className = 'day-cell';
+        if (otherMonth) cell.classList.add('other-month'); if (key === state.selectedDate) cell.classList.add('selected'); if (key === todayKey) cell.classList.add('today');
+        cell.addEventListener('click', () => { state.selectedDate = key; state.viewYear = date.getFullYear(); state.viewMonth = date.getMonth(); state.viewCalendar = false; saveState(); render(); });
+        
+        cell.innerHTML = `<div class="day-top"><strong>${date.getDate()}</strong><span class="day-total">${summary.total ? formatDuration(summary.total, true) : ''}</span></div>`;
+        const bars = document.createElement('div'); bars.className = 'mini-bars';
+        summary.topTasks.forEach(item => {
+          const bar = document.createElement('div'); bar.className = 'mini-bar';
+          bar.style.setProperty('--w', Math.max(6, Math.round((item.ms / Math.max(summary.total, 1)) * 100)) + '%'); bar.style.setProperty('--c', colorForTask(item.taskId));
+          bar.title = `${item.task.name}: ${formatDuration(item.ms)}`; bars.appendChild(bar);
+        });
+        cell.appendChild(bars); els.calendarGrid.appendChild(cell);
+      });
+    }
+
+    function renderDayDetail() {
+      const dateKey = state.selectedDate, segments = getAllSessionsWithDaySplit(dateKey, { includeAllTabs: true });
+      const total = segments.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
+      els.dayDetail.innerHTML = '';
+      const header = document.createElement('div'); header.className = 'timeline-card';
+      header.innerHTML = `<div class="timeline-head"><div><h3>${formatDateJP(dateKey)}</h3><div class="timeline-sub">全タブ合計: <strong>${formatDuration(total)}</strong></div></div></div>`;
+      
+      const legend = document.createElement('div'); legend.className = 'legend';
+      state.tabs.forEach(tab => {
+        const item = document.createElement('div'); item.className = 'legend-item';
+        item.innerHTML = `<span class="dot" style="background:${colorForTab(tab.id)}"></span>${escapeHtml(tab.name)}`; legend.appendChild(item);
+      }); header.appendChild(legend);
+
+      if (segments.length === 0) { header.innerHTML += `<div class="empty">この日の記録はまだありません。</div>`; els.dayDetail.appendChild(header); return; }
+
+      const timeline = document.createElement('div'); timeline.className = 'timeline';
+      const grid = document.createElement('div'); grid.className = 'timeline-grid';
+      for (let h = 0; h <= 24; h++) {
+        const top = h * hourHeight();
+        grid.innerHTML += `<div class="hour-line" style="top:${top}px;"></div>`;
+        if (h < 24) grid.innerHTML += `<div class="hour-label" style="top:${top}px;">${String(h).padStart(2, '0')}:00</div>`;
+      }
+      segments.forEach(seg => {
+        const startM = seg.start.getHours() * 60 + seg.start.getMinutes() + seg.start.getSeconds() / 60;
+        const endM = seg.end.getHours() * 60 + seg.end.getMinutes() + seg.end.getSeconds() / 60;
+        const top = (startM / 60) * hourHeight(), height = Math.max(12, ((endM - startM) / 60) * hourHeight());
+        grid.innerHTML += `<div class="session-block" style="top:${top}px; height:${height}px; background:${colorForTab(seg.tabId, 0.26)}; border-color:${colorForTab(seg.tabId, 0.42)}">
+          <div class="session-title">${escapeHtml(seg.taskName)} <span style="font-weight:600;opacity:.8;">/ ${escapeHtml(seg.tabName)}</span></div>
+          <div class="session-time">${formatTime(seg.start)} - ${formatTime(seg.end)} (${formatDuration(seg.end - seg.start, true)})</div></div>`;
+      });
+      timeline.appendChild(grid); header.appendChild(timeline);
+
+      const list = document.createElement('div'); list.className = 'session-list';
+      segments.forEach(seg => {
+        list.innerHTML += `<div class="session-item"><span class="dot" style="background:${colorForTab(seg.tabId)}; width:12px; height:12px;"></span>
+          <div><div class="name">${escapeHtml(seg.taskName)}</div><div class="path">${escapeHtml(seg.path.join(' > '))}</div><div class="tab-chip"><span class="dot" style="background:${colorForTab(seg.tabId)}"></span>${escapeHtml(seg.tabName)}</div></div>
+          <div class="time">${formatTime(seg.start)} - ${formatTime(seg.end)}<br>${formatDuration(seg.end - seg.start)}</div></div>`;
+      });
+      header.appendChild(list); header.innerHTML += `<div class="footer-note">※ 日付をまたぐ記録は各日に分割して表示します。</div>`;
+      els.dayDetail.appendChild(header);
+    }
+
+    function clearDragState(shouldRefreshTaskList = true) { dragState.draggingId = null; dragState.overGapKey = null; dragState.overNestId = null; if (shouldRefreshTaskList) updateDragHighlights(); }
+    function updateDragHighlights() {
+      document.querySelectorAll('.drop-gap').forEach(el => el.classList.toggle('active', el.dataset.gapKey === dragState.overGapKey));
+      document.querySelectorAll('.task-row').forEach(el => el.classList.toggle('nest-target', el.dataset.taskId === dragState.overNestId));
+    }
+    function toDateKey(date) { const y = date.getFullYear(), m = String(date.getMonth() + 1).padStart(2, '0'), d = String(date.getDate()).padStart(2, '0'); return `${y}-${m}-${d}`; }
+    function formatDateJP(dateKey) { const [y, m, d] = dateKey.split('-').map(Number), date = new Date(y, m - 1, d); return `${y}年${m}月${d}日（${['日', '月', '火', '水', '木', '金', '土'][date.getDay()]}）`; }
+    function formatTime(date) { return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`; }
+    function formatDuration(ms, short = false) {
+      const sec = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+      if (short) return h > 0 ? `${h}h ${m}m` : (m > 0 ? `${m}m` : `${s}s`);
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+    function hourHeight() { return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--hour-height')) || 28; }
+    function defaultColorKeyForTask(seed) { const str = String(seed || 'task'), index = [...str].reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % COLOR_PALETTE.length; return COLOR_PALETTE[index].key; }
+    function getColorDef(colorKey) { return COLOR_PALETTE.find(c => c.key === colorKey) || COLOR_PALETTE[0]; }
+    function colorLabel(colorKey) { return getColorDef(colorKey).label; }
+    function colorForTask(taskId, alpha) { const task = getTask(taskId), color = getColorDef(task ? task.colorKey : COLOR_PALETTE[0].key); return typeof alpha === 'number' ? `rgba(${hexToRgb(color.solid).join(', ')}, ${alpha})` : color.solid; }
+    function colorForTab(tabId, alpha) { const tab = getTab(tabId), color = getColorDef(tab ? tab.colorKey : 'blue'); return typeof alpha === 'number' ? `rgba(${hexToRgb(color.solid).join(', ')}, ${alpha})` : color.solid; }
+    function applyTaskRowColor(row, task) { const color = getColorDef(task.colorKey); row.style.background = color.soft; row.style.borderColor = color.mid; }
+    function hexToRgb(hex) { const value = hex.replace('#', ''), safe = value.length === 3 ? value.split('').map(ch => ch + ch).join('') : value, num = parseInt(safe, 16); return [(num >> 16) & 255, (num >> 8) & 255, num & 255]; }
+    function escapeHtml(str) { return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;'); }
+  </script>
+</body>
+</html>
