@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>階層ToDo・時間記録アプリ (クラウド同期版)</title>
+  <title>To Do List ＆ Time Log</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%232563eb'/%3E%3Ccircle cx='32' cy='32' r='22' fill='white' opacity='0.96'/%3E%3Cpath d='M32 18v15l10 6' stroke='%232563eb' stroke-width='4.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">
   <style>
     :root {
       --bg: #f6f7fb; --panel: #ffffff; --line: #d9deea; --text: #1f2937;
@@ -20,7 +21,15 @@
 
     /* ヘッダーと認証UI */
     .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+    .header-text { display: flex; flex-direction: column; gap: 8px; }
     .header-text h1 { margin: 0; font-size: 1.35rem; }
+    .active-summary { min-width: min(100%, 560px); padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; box-shadow: var(--shadow); font-size: 0.92rem; line-height: 1.55; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .active-summary-text { min-width: 0; flex: 1 1 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .active-summary .summary-label { color: var(--sub); font-weight: 700; margin-right: 6px; }
+    .active-summary strong { font-size: 1rem; }
+    .summary-stop-btn { width: 36px; height: 36px; border-radius: 999px; border: 1px solid #fecaca; background: #fff1f2; color: #dc2626; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 auto; transition: 0.15s ease; }
+    .summary-stop-btn:hover { background: #ffe4e6; transform: translateY(-1px); box-shadow: 0 4px 10px rgba(15, 23, 42, 0.05); }
+    .summary-stop-btn svg { width: 16px; height: 16px; fill: currentColor; }
     
     .auth-container { display: flex; align-items: center; gap: 10px; background: #fff; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); box-shadow: var(--shadow); }
     .user-info { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: 600; color: #334155; }
@@ -50,7 +59,15 @@
     }
     .tab-btn { padding: 10px 18px; border-radius: 12px 12px 0 0; font-weight: 700; background: #f8fafc; border-bottom: 1px solid var(--line); display: inline-flex; align-items: center; gap: 7px; color: var(--sub); }
     .tab-btn.active { background: var(--panel); border-color: var(--line); border-bottom-color: var(--panel); color: var(--text); padding-bottom: 11px; }
+    .tab-btn.dragging { opacity: 0.55; }
+    .tab-btn.drop-before { box-shadow: inset 3px 0 0 var(--accent); }
+    .tab-btn.drop-after { box-shadow: inset -3px 0 0 var(--accent); }
     .tab-dot { width: 11px; height: 11px; border-radius: 999px; display: inline-block; flex: 0 0 auto; }
+    .tab-dot.blinking { animation: tab-dot-blink 1.05s infinite; }
+    @keyframes tab-dot-blink {
+      0%, 48% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.28); }
+      50%, 100% { opacity: 0.25; transform: scale(0.75); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+    }
     .tab-actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; padding-bottom: 5px; }
     .tab-action-btn { border-radius: 8px; padding: 6px 10px; font-size: 0.85rem; }
     .tab-action-btn:hover, .task-create button:hover, .icon-btn:hover, .detail-btn:hover, .small-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(15, 23, 42, 0.05); }
@@ -61,6 +78,11 @@
     .panel-body { padding: 16px; }
 
     .task-create { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 16px; }
+    .task-filter-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fbfdff; }
+    .filter-label { font-size: 0.85rem; font-weight: 700; color: var(--sub); }
+    .filter-clear-btn.active { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
+    .filter-swatch { width: 22px; height: 22px; border-radius: 999px; border: 1px solid rgba(15, 23, 42, 0.18); cursor: pointer; padding: 0; }
+    .filter-swatch.selected { outline: 3px solid rgba(37, 99, 235, 0.22); outline-offset: 2px; transform: scale(1.06); }
     .task-create input, .detail-textarea, .detail-task-name { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #fff; width: 100%; }
     .task-create button { border-radius: 10px; font-weight: bold; }
 
@@ -86,18 +108,18 @@
     /* 実行中タスクの強調アニメーション */
     .task-row.active-task { 
       outline: none;
-      border-color: var(--ok) !important; 
-      background-color: #f0fdf4 !important;
-      animation: active-pulse 2s infinite; 
+      border-color: #ef4444 !important; 
+      animation: active-border-blink 1.15s infinite; 
     }
-    @keyframes active-pulse {
-      0% { box-shadow: 0 0 0 0 rgba(21, 128, 61, 0.3); }
-      70% { box-shadow: 0 0 0 8px rgba(21, 128, 61, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(21, 128, 61, 0); }
+    @keyframes active-border-blink {
+      0%, 48% { border-color: #ef4444; box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.18); }
+      50%, 100% { border-color: rgba(239, 68, 68, 0.22); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
     }
 
     .collapse-btn { grid-area: collapse; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; color: var(--sub); user-select: none; font-weight: 700; border: none; background: transparent; cursor: pointer; padding: 0; }
     .collapse-btn:hover { background: rgba(0,0,0,0.05); }
+    .collapse-btn.leaf-placeholder { opacity: 0; cursor: default; }
+    .collapse-btn.leaf-placeholder:hover { background: transparent; }
     
     .task-name-display { grid-area: name; font-weight: 600; font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: none; }
     .detail-btn { grid-area: detail; border-radius: 8px; padding: 6px 12px; color: var(--sub); background: rgba(255,255,255,0.75); font-size: 0.85rem; font-weight: bold; }
@@ -145,7 +167,11 @@
     .session-item:hover { border-color: #bfdbfe; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05); }
     .session-item .name { font-weight: 700; font-size: 0.95rem; }
     .session-item .path { color: var(--sub); font-size: 0.8rem; margin-top: 2px; line-height: 1.35; }
-    .session-item .time { font-size: 0.85rem; color: #334155; font-weight: 700; white-space: nowrap; text-align: right; }
+    .session-item .time { font-size: 0.98rem; color: #334155; font-weight: 800; white-space: nowrap; text-align: right; }
+    .session-duration { display: inline-block; margin-top: 4px; font-size: 1.08rem; font-weight: 800; color: #0f172a; }
+    .session-actions { display: flex; gap: 8px; align-items: center; }
+    .delete-btn { color: var(--danger); border-color: #fecaca; background: #fff5f5; }
+    .delete-btn:hover { background: #fee2e2; }
     .small-btn { border-radius: 8px; padding: 6px 12px; font-size: 0.85rem; font-weight: bold; background: white; border: 1px solid var(--line); cursor: pointer; color: var(--text); }
     .edit-btn { background: #f8fafc; color: var(--accent); border-color: #bfdbfe; }
     .edit-btn:hover { background: #eff6ff; }
@@ -165,6 +191,8 @@
     /* スマートフォン表示の調整 */
     @media (max-width: 640px) {
       .app { padding: 8px; } .task-create { grid-template-columns: 1fr; }
+      .active-summary { min-width: 100%; }
+      .task-filter-bar { align-items: flex-start; }
       /* スマホ時は複数行に折り返す */
       .task-row { grid-template-columns: 24px 1fr auto auto; grid-template-areas: "collapse name detail delete" "meta meta meta meta"; padding: 10px 8px; }
       .row-color-picker { display: none !important; } /* スマホ時は行のカラー選択を非表示 */
@@ -182,7 +210,10 @@
     
     <div class="header">
       <div class="header-text">
-        <h1>階層ToDo・時間記録アプリ</h1>
+        <h1>To Do List ＆ Time Log</h1>
+        <div id="activeSummary" class="active-summary">
+          <span class="summary-label">現在記録中</span>なし
+        </div>
       </div>
       <div class="auth-container" id="auth-container">
         <button class="btn-login" id="loginBtn">Googleでログイン</button>
@@ -200,6 +231,11 @@
         <div class="tabs-row" id="tabsRow"></div>
         <section class="panel" style="border-top-left-radius: 0;">
           <div class="panel-body">
+            <div class="task-filter-bar">
+              <span class="filter-label">色で絞り込み</span>
+              <button id="clearColorFilterBtn" class="small-btn filter-clear-btn active">すべて</button>
+              <div id="taskColorFilter" class="color-picker"></div>
+            </div>
             <div class="task-create">
               <input id="newTaskInput" type="text" placeholder="新しいタスク名を入力" disabled />
               <button id="addTaskBtn" disabled>タスク追加</button>
@@ -225,7 +261,6 @@
             <div>
               <input type="date" id="statStartDate"> 〜 <input type="date" id="statEndDate">
             </div>
-            <button id="updateStatsBtn" class="small-btn">集計する</button>
           </div>
           <div class="panel-body" id="statsDetail"></div>
         </section>
@@ -282,14 +317,14 @@
     let unsubscribeSnapshot = null;
 
     const COLOR_PALETTE = [
-      { key: 'rose', label: 'ローズ', solid: '#e11d48', soft: 'rgba(225, 29, 72, 0.12)', mid: 'rgba(225, 29, 72, 0.26)' },
-      { key: 'orange', label: 'オレンジ', solid: '#ea580c', soft: 'rgba(234, 88, 12, 0.12)', mid: 'rgba(234, 88, 12, 0.26)' },
-      { key: 'amber', label: 'アンバー', solid: '#d97706', soft: 'rgba(217, 119, 6, 0.12)', mid: 'rgba(217, 119, 6, 0.26)' },
-      { key: 'green', label: 'グリーン', solid: '#16a34a', soft: 'rgba(22, 163, 74, 0.12)', mid: 'rgba(22, 163, 74, 0.26)' },
-      { key: 'teal', label: 'ティール', solid: '#0f766e', soft: 'rgba(15, 118, 110, 0.12)', mid: 'rgba(15, 118, 110, 0.26)' },
-      { key: 'blue', label: 'ブルー', solid: '#2563eb', soft: 'rgba(37, 99, 235, 0.12)', mid: 'rgba(37, 99, 235, 0.26)' },
-      { key: 'violet', label: 'バイオレット', solid: '#7c3aed', soft: 'rgba(124, 58, 237, 0.12)', mid: 'rgba(124, 58, 237, 0.26)' },
-      { key: 'slate', label: 'スレート', solid: '#475569', soft: 'rgba(71, 85, 105, 0.12)', mid: 'rgba(71, 85, 105, 0.26)' }
+      { key: 'rose', label: 'ローズ', solid: '#e11d48', soft: 'rgba(225, 29, 72, 0.18)', mid: 'rgba(225, 29, 72, 0.38)' },
+      { key: 'orange', label: 'オレンジ', solid: '#ea580c', soft: 'rgba(234, 88, 12, 0.18)', mid: 'rgba(234, 88, 12, 0.38)' },
+      { key: 'amber', label: 'イエロー', solid: '#facc15', soft: 'rgba(250, 204, 21, 0.24)', mid: 'rgba(234, 179, 8, 0.42)' },
+      { key: 'green', label: 'グリーン', solid: '#16a34a', soft: 'rgba(22, 163, 74, 0.18)', mid: 'rgba(22, 163, 74, 0.38)' },
+      { key: 'teal', label: 'ティール', solid: '#0f766e', soft: 'rgba(15, 118, 110, 0.18)', mid: 'rgba(15, 118, 110, 0.38)' },
+      { key: 'blue', label: 'ブルー', solid: '#2563eb', soft: 'rgba(37, 99, 235, 0.18)', mid: 'rgba(37, 99, 235, 0.38)' },
+      { key: 'violet', label: 'バイオレット', solid: '#7c3aed', soft: 'rgba(124, 58, 237, 0.18)', mid: 'rgba(124, 58, 237, 0.38)' },
+      { key: 'slate', label: 'スレート', solid: '#475569', soft: 'rgba(71, 85, 105, 0.18)', mid: 'rgba(71, 85, 105, 0.38)' }
     ];
 
     const now = new Date();
@@ -298,10 +333,12 @@
       activeTabId: 'tab_default',
       tasks: [],
       activeTaskId: null,
-      selectedDate: toDateKey(now)
+      selectedDate: toDateKey(now),
+      taskColorFilterKeys: []
     };
 
     const dragState = { draggingId: null, overGapKey: null, overNestId: null };
+    const tabDragState = { draggingId: null, overId: null, after: false };
     
     // モーダル用ステート
     let modalMode = null; // 'add' | 'edit'
@@ -312,7 +349,10 @@
       authContainer: document.getElementById('auth-container'),
       mainApp: document.getElementById('main-app'),
       loginBtn: document.getElementById('loginBtn'),
+      activeSummary: document.getElementById('activeSummary'),
       tabsRow: document.getElementById('tabsRow'),
+      taskColorFilter: document.getElementById('taskColorFilter'),
+      clearColorFilterBtn: document.getElementById('clearColorFilterBtn'),
       newTaskInput: document.getElementById('newTaskInput'), 
       addTaskBtn: document.getElementById('addTaskBtn'),
       taskList: document.getElementById('taskList'), 
@@ -320,7 +360,6 @@
       dailyDateInput: document.getElementById('dailyDateInput'),
       statStartDate: document.getElementById('statStartDate'),
       statEndDate: document.getElementById('statEndDate'),
-      updateStatsBtn: document.getElementById('updateStatsBtn'),
       statsDetail: document.getElementById('statsDetail'),
       mainNavBtns: document.querySelectorAll('.main-nav-btn'),
       viewSections: document.querySelectorAll('.view-section'),
@@ -331,9 +370,7 @@
       modalSaveBtn: document.getElementById('modalSaveBtn')
     };
 
-    els.dailyDateInput.value = state.selectedDate;
-    els.statStartDate.value = state.selectedDate;
-    els.statEndDate.value = state.selectedDate;
+    applyTodayAsDefaultDates();
 
     els.mainNavBtns.forEach(btn => {
       btn.addEventListener('click', () => {
@@ -379,6 +416,7 @@
         els.newTaskInput.disabled = true;
         els.addTaskBtn.disabled = true;
         state.tasks = [];
+        renderActiveSummary();
         render();
       }
     });
@@ -390,7 +428,14 @@
         if (docSnap.exists()) {
           const data = docSnap.data();
           if (!docSnap.metadata.hasPendingWrites) {
-            state = { ...state, ...data };
+            state = {
+              ...state,
+              ...data,
+              taskColorFilterKeys: Array.isArray(data.taskColorFilterKeys)
+                ? data.taskColorFilterKeys
+                : (data.taskColorFilterKey ? [data.taskColorFilterKey] : [])
+            };
+            applyTodayAsDefaultDates();
             if(statusEl) { statusEl.textContent = "✔ 同期済"; statusEl.style.color = "var(--ok)"; }
             render();
             renderStats();
@@ -425,6 +470,7 @@
       if (state.activeTaskId && !dragState.draggingId && !editingText && els.sessionModal.classList.contains('hidden')) {
         renderTaskList();
         renderDayDetail();
+        renderActiveSummary();
       }
     }, 1000);
 
@@ -437,11 +483,13 @@
         saveState(); renderDayDetail();
       });
 
-      els.updateStatsBtn.addEventListener('click', renderStats);
-      
+      els.statStartDate.addEventListener('change', renderStats);
+      els.statEndDate.addEventListener('change', renderStats);
+
       els.addSessionBtn.addEventListener('click', openModalForAdd);
       els.modalCancelBtn.addEventListener('click', closeModal);
       els.modalSaveBtn.addEventListener('click', saveModal);
+      els.clearColorFilterBtn.addEventListener('click', () => setTaskColorFilter(null));
     }
 
     function currentTabId() { return state.activeTabId; }
@@ -498,6 +546,32 @@
       state.activeTabId = tabId; saveState(); render();
     }
 
+    function moveTab(tabId, targetTabId, placeAfter = false) {
+      if (!tabId || !targetTabId || tabId === targetTabId) return;
+      const orderedIds = state.tabs.map(tab => tab.id).filter(id => id !== tabId);
+      let targetIndex = orderedIds.indexOf(targetTabId);
+      if (targetIndex < 0) return;
+      if (placeAfter) targetIndex += 1;
+      orderedIds.splice(targetIndex, 0, tabId);
+      state.tabs = orderedIds.map(id => state.tabs.find(tab => tab.id === id)).filter(Boolean);
+      saveState(); renderTabs();
+    }
+
+    function setTaskColorFilter(colorKey) {
+      if (!colorKey) {
+        state.taskColorFilterKeys = [];
+      } else {
+        const current = Array.isArray(state.taskColorFilterKeys) ? [...state.taskColorFilterKeys] : [];
+        const index = current.indexOf(colorKey);
+        if (index >= 0) current.splice(index, 1);
+        else current.push(colorKey);
+        state.taskColorFilterKeys = current;
+      }
+      saveState();
+      renderTaskColorFilter();
+      renderTaskList();
+    }
+
     function updateTaskColor(taskId, colorKey) {
       const task = getTask(taskId); if (!task) return;
       task.colorKey = COLOR_PALETTE.some(c => c.key === colorKey) ? colorKey : task.colorKey;
@@ -521,6 +595,12 @@
       deleteIds.forEach(id => stopTask(id, false));
       state.tasks = state.tasks.filter(t => !deleteIds.has(t.id));
       normalizeOrders(task.parentId, task.tabId);
+      saveState(); render();
+    }
+
+    function deleteSession(taskId, sessionIndex) {
+      const task = getTask(taskId); if (!task) return;
+      task.sessions.splice(sessionIndex, 1);
       saveState(); render();
     }
 
@@ -715,6 +795,48 @@
       return names;
     }
 
+    function getCurrentRunDurationMs(taskId) {
+      const task = getTask(taskId); if (!task || !task.activeStart) return 0;
+      const start = new Date(task.activeStart).getTime();
+      return Number.isFinite(start) ? Math.max(0, Date.now() - start) : 0;
+    }
+
+    function hasActiveTaskColorFilter() {
+      return Array.isArray(state.taskColorFilterKeys) && state.taskColorFilterKeys.length > 0;
+    }
+
+    function doesTaskMatchColorFilter(task) {
+      if (!task) return false;
+      if (!hasActiveTaskColorFilter()) return true;
+      if (state.taskColorFilterKeys.includes(task.colorKey)) return true;
+      return getChildren(task.id, task.tabId).some(child => doesTaskMatchColorFilter(child));
+    }
+
+    function getRenderableChildren(parentId, tabId = currentTabId()) {
+      return getChildren(parentId, tabId).filter(task => doesTaskMatchColorFilter(task));
+    }
+
+    function getVisibleTaskCount(tabId = currentTabId()) {
+      return getTasksInTab(tabId).filter(task => doesTaskMatchColorFilter(task)).length;
+    }
+
+    function getActiveTaskSummaryData() {
+      const task = getTask(state.activeTaskId);
+      if (!task || !task.activeStart) return null;
+      const tab = getTab(task.tabId);
+      return {
+        taskId: task.id,
+        taskName: task.name,
+        tabName: tab ? tab.name : '無題タブ',
+        runMs: getCurrentRunDurationMs(task.id),
+        totalMs: getOwnDurationMs(task.id)
+      };
+    }
+
+    function hasActiveTaskInTab(tabId) {
+      return state.tasks.some(task => task.tabId === tabId && Boolean(task.activeStart));
+    }
+
     function getOwnDurationMs(taskId) {
       const task = getTask(taskId); if (!task) return 0;
       let total = 0;
@@ -762,8 +884,28 @@
     }
 
     function render() {
+      renderActiveSummary();
       if(!currentUser) return;
-      renderTabs(); renderTaskList(); renderDayDetail();
+      renderTabs(); renderTaskColorFilter(); renderTaskList(); renderDayDetail();
+    }
+
+    function renderActiveSummary() {
+      if (!els.activeSummary) return;
+      const info = getActiveTaskSummaryData();
+      if (!info) {
+        els.activeSummary.innerHTML = `<div class="active-summary-text"><span class="summary-label">現在記録中</span>なし</div>`;
+        return;
+      }
+      els.activeSummary.innerHTML = `
+        <div class="active-summary-text">
+          <span class="summary-label">現在記録中</span><strong>${escapeHtml(info.taskName)}</strong> / <span class="summary-label">タブ</span>${escapeHtml(info.tabName)} / <span class="summary-label">今回</span>${formatDuration(info.runMs)} / <span class="summary-label">累計</span>${formatDuration(info.totalMs)}
+        </div>
+        <button class="summary-stop-btn" id="activeSummaryStopBtn" type="button" aria-label="記録を停止" title="記録を停止">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
+        </button>
+      `;
+      const stopBtn = document.getElementById('activeSummaryStopBtn');
+      if (stopBtn) stopBtn.addEventListener('click', () => stopTask(info.taskId));
     }
 
     function renderTabs() {
@@ -771,8 +913,35 @@
       state.tabs.forEach(tab => {
         const btn = document.createElement('button');
         btn.className = 'tab-btn' + (tab.id === currentTabId() ? ' active' : '');
-        btn.innerHTML = `<span class="tab-dot" style="background:${colorForTab(tab.id)}"></span>${escapeHtml(tab.name)}`;
+        btn.dataset.tabId = tab.id;
+        if (tabDragState.draggingId === tab.id) btn.classList.add('dragging');
+        if (tabDragState.overId === tab.id) btn.classList.add(tabDragState.after ? 'drop-after' : 'drop-before');
+        btn.innerHTML = `<span class="tab-dot${hasActiveTaskInTab(tab.id) ? ' blinking' : ''}" style="background:${colorForTab(tab.id)}"></span>${escapeHtml(tab.name)}`;
+        btn.draggable = true;
         btn.addEventListener('click', () => switchTab(tab.id));
+        btn.addEventListener('dragstart', (e) => {
+          tabDragState.draggingId = tab.id;
+          if (e.dataTransfer) {
+            e.dataTransfer.setData('text/plain', tab.id);
+            e.dataTransfer.effectAllowed = 'move';
+          }
+          requestAnimationFrame(() => updateTabDragHighlights());
+        });
+        btn.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          if (!tabDragState.draggingId || tabDragState.draggingId === tab.id) return;
+          const rect = btn.getBoundingClientRect();
+          tabDragState.overId = tab.id;
+          tabDragState.after = (e.clientX - rect.left) > rect.width / 2;
+          updateTabDragHighlights();
+        });
+        btn.addEventListener('drop', (e) => {
+          e.preventDefault();
+          if (!tabDragState.draggingId || tabDragState.draggingId === tab.id) return;
+          moveTab(tabDragState.draggingId, tab.id, tabDragState.after);
+          clearTabDragState();
+        });
+        btn.addEventListener('dragend', () => clearTabDragState());
         els.tabsRow.appendChild(btn);
       });
 
@@ -783,10 +952,46 @@
       els.tabsRow.appendChild(actions);
     }
 
+    function updateTabDragHighlights() {
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        const isDragging = btn.dataset.tabId === tabDragState.draggingId;
+        const isOver = btn.dataset.tabId === tabDragState.overId;
+        btn.classList.toggle('dragging', isDragging);
+        btn.classList.toggle('drop-before', isOver && !tabDragState.after);
+        btn.classList.toggle('drop-after', isOver && tabDragState.after);
+      });
+    }
+
+    function clearTabDragState() {
+      tabDragState.draggingId = null;
+      tabDragState.overId = null;
+      tabDragState.after = false;
+      updateTabDragHighlights();
+    }
+
+    function renderTaskColorFilter() {
+      if (!els.taskColorFilter) return;
+      els.taskColorFilter.innerHTML = '';
+      const selectedKeys = Array.isArray(state.taskColorFilterKeys) ? state.taskColorFilterKeys : [];
+      COLOR_PALETTE.forEach(color => {
+        const btn = document.createElement('button');
+        btn.className = 'filter-swatch' + (selectedKeys.includes(color.key) ? ' selected' : '');
+        btn.style.background = color.solid;
+        btn.title = color.label;
+        btn.addEventListener('click', () => setTaskColorFilter(color.key));
+        els.taskColorFilter.appendChild(btn);
+      });
+      els.clearColorFilterBtn.classList.toggle('active', selectedKeys.length === 0);
+    }
+
     function renderTaskList() {
       els.taskList.innerHTML = '';
       if (getTasksInTab().length === 0) {
         const empty = document.createElement('div'); empty.className = 'empty'; empty.textContent = 'このタブにはまだタスクがありません。'; els.taskList.appendChild(empty);
+        return;
+      }
+      if (getVisibleTaskCount() === 0) {
+        const empty = document.createElement('div'); empty.className = 'empty'; empty.textContent = '指定した色のタスクはありません。'; els.taskList.appendChild(empty);
         return;
       }
       els.taskList.appendChild(renderTaskChildren(null, 0, currentTabId()));
@@ -794,14 +999,15 @@
 
     function renderTaskChildren(parentId, depth, tabId) {
       const wrapper = document.createElement('div'); wrapper.className = 'children';
-      wrapper.appendChild(createGap(parentId, 0, depth, tabId));
-      getChildren(parentId, tabId).forEach((task, index) => {
+      const visibleChildren = getRenderableChildren(parentId, tabId);
+      if (!hasActiveTaskColorFilter()) wrapper.appendChild(createGap(parentId, 0, depth, tabId));
+      visibleChildren.forEach((task, index) => {
         const block = document.createElement('div'); block.className = 'task-block';
         block.appendChild(createTaskRow(task, depth));
         if (task.detailOpen) block.appendChild(createDetailPanel(task, depth));
         if (!task.collapsed && hasChildren(task.id)) block.appendChild(renderTaskChildren(task.id, depth + 1, tabId));
         wrapper.appendChild(block);
-        wrapper.appendChild(createGap(parentId, index + 1, depth, tabId));
+        if (!hasActiveTaskColorFilter()) wrapper.appendChild(createGap(parentId, index + 1, depth, tabId));
       });
       return wrapper;
     }
@@ -809,6 +1015,7 @@
     function createGap(parentId, index, depth, tabId) {
       const gap = document.createElement('div'); const key = `${tabId}__${parentId ?? 'root'}__${index}`;
       gap.className = 'drop-gap'; gap.dataset.gapKey = key; gap.style.setProperty('--depth', depth);
+      if (hasActiveTaskColorFilter()) return gap;
       if (dragState.overGapKey === key) gap.classList.add('active');
 
       gap.addEventListener('dragover', (e) => {
@@ -830,7 +1037,7 @@
       if (dragState.overNestId === task.id) row.classList.add('nest-target');
 
       // 行全体をドラッグ可能に
-      row.draggable = true;
+      row.draggable = !hasActiveTaskColorFilter();
       row.addEventListener('dragstart', (e) => {
         dragState.draggingId = task.id;
         if (e.dataTransfer) { e.dataTransfer.setData('text/plain', task.id); e.dataTransfer.effectAllowed = 'move'; }
@@ -843,7 +1050,8 @@
         toggleTaskTimer(task.id);
       });
 
-      const collapseBtn = document.createElement('button'); collapseBtn.className = 'collapse-btn'; collapseBtn.textContent = hasChildren(task.id) ? (task.collapsed ? '▶' : '▼') : '•'; collapseBtn.disabled = !hasChildren(task.id);
+      const collapseBtn = document.createElement('button'); collapseBtn.className = 'collapse-btn'; collapseBtn.textContent = hasChildren(task.id) ? (task.collapsed ? '▶' : '▼') : ''; collapseBtn.disabled = !hasChildren(task.id);
+      if (!hasChildren(task.id)) collapseBtn.classList.add('leaf-placeholder');
       collapseBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleCollapsed(task.id); }); 
       row.appendChild(collapseBtn);
 
@@ -853,7 +1061,8 @@
       const meta = document.createElement('div'); meta.className = 'meta-wrap';
       if (task.activeStart) { const b = document.createElement('span'); b.className = 'badge active-badge'; b.textContent = '⏱ 計測中'; meta.appendChild(b); }
       if (hasChildren(task.id)) { meta.innerHTML += `<span class="badge"><span class="dot" style="background:${colorForTask(task.id)}"></span>子合計 ${formatDuration(getDescendantDurationMs(task.id))}</span>`; } 
-      else { meta.innerHTML += `<span class="badge"><span class="dot" style="background:${colorForTask(task.id)}"></span>${formatDuration(getOwnDurationMs(task.id))}</span>`; }
+      else { meta.innerHTML += `<span class="badge"><span class="dot" style="background:${colorForTask(task.id)}"></span>合計 ${formatDuration(getOwnDurationMs(task.id))}</span>`; }
+      if (task.activeStart) meta.innerHTML += `<span class="badge">今回 ${formatDuration(getCurrentRunDurationMs(task.id))}</span>`;
       row.appendChild(meta);
 
       // PC用の行内カラーピッカー
@@ -974,16 +1183,29 @@
           </div>
           <div class="time">
             ${formatTime(seg.start)} - ${formatTime(seg.end)}<br>
-            <span style="font-weight: normal; color: var(--sub);">${formatDuration(seg.end - seg.start)}</span>
+            <span class="session-duration">${formatDuration(seg.end - seg.start)}</span>
           </div>
         `;
         
         // 計測中のものは編集ボタンを非表示
         if (seg.sessionIndex !== 'active') {
+          const actionWrap = document.createElement('div');
+          actionWrap.className = 'session-actions';
+
           const editBtn = document.createElement('button');
           editBtn.className = 'small-btn edit-btn'; editBtn.textContent = '編集';
           editBtn.addEventListener('click', (e) => { e.stopPropagation(); openModalForEdit(seg.taskId, seg.sessionIndex); });
-          item.appendChild(editBtn);
+          actionWrap.appendChild(editBtn);
+
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'small-btn delete-btn'; deleteBtn.textContent = '削除';
+          deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (confirm(`「${seg.taskName}」のこの記録を削除しますか？`)) deleteSession(seg.taskId, seg.sessionIndex);
+          });
+          actionWrap.appendChild(deleteBtn);
+
+          item.appendChild(actionWrap);
         } else {
           const badge = document.createElement('span'); badge.className = 'badge active-badge'; badge.textContent = '計測中'; item.appendChild(badge);
         }
@@ -1044,6 +1266,14 @@
       }
       
       els.statsDetail.innerHTML = html;
+    }
+
+    function applyTodayAsDefaultDates() {
+      const today = toDateKey(new Date());
+      state.selectedDate = today;
+      els.dailyDateInput.value = today;
+      els.statStartDate.value = today;
+      els.statEndDate.value = today;
     }
 
     function clearDragState(shouldRefreshTaskList = true) { dragState.draggingId = null; dragState.overGapKey = null; dragState.overNestId = null; if (shouldRefreshTaskList) updateDragHighlights(); }
